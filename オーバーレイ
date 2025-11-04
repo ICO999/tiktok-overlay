@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TikFinity Overlay</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+    #effect {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+  </style>
+</head>
+<body>
+<div id="effect"></div>
+
+<script>
+window.addEventListener("message", (event) => {
+  if (!event.data || !event.data.event) return;
+
+  // ギフトが来たときだけ反応
+  if (event.data.event === "gift") {
+    const el = document.getElementById("effect");
+    el.textContent = event.data.name; // ← ここは後で好きな文字/画像にできる
+    el.style.opacity = 1;
+    setTimeout(() => el.style.opacity = 0, 1200);
+  }
+});
+</script>
+</body>
+</html>
