@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ノーチェ演出オーバーレイ (D)</title>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+  #overlay{
+    position:fixed;inset:0;pointer-events:none;
+    display:flex;align-items:center;justify-content:center;
+    mix-blend-mode:normal;
+  }
+  /* 黒く沈むレイヤー */
+  .darken{
+    position:absolute;inset:0;background:rgba(0,0,0,0);transition:background 0.6s ease;
+    will-change:background;
+  }
+  /* ノイズキャンバス */
+  canvas#noise{position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity 0.4s ease;mix-blend-mode:overlay;pointer-events:none}
+  /* わずかな走査ライン */
+  .scanline{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px);background-size:100% 4px;opacity:0;transition:opacity 0.4s ease;mix-blend-mode:soft-light}
+  /* 中央の一時的なグリッチフレア */
+  .flash{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(1.0);
+    width:60%;height:60%;border-radius:8px;
+    pointer-events:none;opacity:0;
+    background:radial-gradient(ellipse at center, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.00) 50%);
+    transition:opacity 0.2s ease, transform 0.6s ease;
+    mix-blend-mode:screen;
+  }
+  /* fallback note (invisible visually) */
+  #debug{position:fixed;left:6px;bottom:6px;padding:6px 8px;background:rgba(0,0,0,0.5);color:#fff;font-size:12px;border-radius:6px;opacity:0.0;pointer-events:auto;z-index:9999}
+  button{font-size:13px;padding:6px;border-radius:6px;border:0;background:#222;color:#fff}
+</style>
+</head>
+<body>
+<div id="overlay" aria-hidden="true">
+  <div class="darken" id="dark"></div>
+  <canvas id="noise"></canvas>
+  <div class="scanline" id="scan"></div>
+  <div class="flash" id="flash"></div>
+</div>
+
+<!-- debug control (visible only when ?debug=1 is given) -->
+<div id="debug">
+  <span>テスト:</span>
+  <button id="btn">発動</button>
+  <button id="btn2">短縮発動</button>
+  <span id="st" style="margin-left:8px"></span>
+</div>
+
+<script>
+// Overlay D - darken + noise + scanline + brief glitch
+(function(){
+  const dark = document.getElementById('dark');
+  const noiseCanvas = document.getElementById('noise');
+  const scan = document.getElementById('scan');
+  const flash = document.getElementById('flash');
+  const debug = document.getElementById('debug');
+  const btn = document.getElementById('btn');
+  const btn2 = document.getElementById('btn2');
+  const st = document.getElementById('st');
+
+  // show debug controls if ?debug=1
+  const params = new URLSearchParams(location.search);
+  if(params.get('debug')==='1'){ debug.style.opacity=1; }
+
+  // Noise canvas setup
+  const ctx = noiseCanvas.getContext('2d');
+  function resize(){
+    noiseCanvas.width = window.innerWidth;
+    noiseCanvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // noise generator
+  let noiseAnim = null;
+  function drawNoise(op){
+    const w = noiseCanvas.width, h = noiseCanvas.height;
+    const img = ctx.createImageData(w,h);
+    const data = img.data;
+    for(let i=0;i<data.length;i+=4){
+      const v = (Math.random()*255)|0;
+      data[i]=data[i+1]=data[i+2]=v;
+      data[i+3]= (op*0.12*255)|0; // alpha scaled
+    }
+    ctx.putImageData(img,0,0);
+  }
+  function startNoise(){ if(noiseAnim) return; noiseAnim = setInterval(()=>{ drawNoise(1); }, 80); noiseCanvas.style.opacity=0.35; }
+  function stopNoise(){ if(noiseAnim){ clearInterval(noiseAnim); noiseAnim=null; } noiseCanvas.style.opacity=0; ctx.clearRect(0,0,noiseCanvas.width,noiseCanvas.height); }
+
+  // effect sequence
+  let running=false;
+  async function triggerEffect(opts={duration:2000,intense:false}){
+    if(running) return;
+    running=true;
+    const dur = opts.duration || 2000;
+    const intense = !!opts.intense;
+
+    // darken fade in (to 0.76 or 0.5)
+    dark.style.transition = 'background '+(intense?'.6s':'.5s')+' cubic-bezier(.2,.8,.2,1)';
+    dark.style.background = 'rgba(0,0,0,' + (intense?0.85:0.62) + ')';
+
+    // start noise & scanline
+    startNoise();
+    scan.style.opacity = 0.22;
+    flash.style.opacity = 0.0;
+    // slight jitter flash
+    setTimeout(()=>{ flash.style.opacity = 0.18; flash.style.transform='translate(-50%,-50%) scale(1.06)'; }, 140);
+
+    // quick micro-glitches (shake via transform)
+    if(intense){
+      document.body.style.transition='filter .2s linear';
+      document.body.style.filter='contrast(0.9)';
+    }
+
+    // play for "dur" then fade out
+    await new Promise(r=>setTimeout(r, dur));
+
+    // fade out
+    flash.style.opacity=0;
+    scan.style.opacity=0;
+    dark.style.background = 'rgba(0,0,0,0)';
+    stopNoise();
+    if(intense){ document.body.style.filter=''; }
+    // cooldown
+    await new Promise(r=>setTimeout(r,500));
+    running=false;
+  }
+
+  // URL trigger: ?t=1 will auto-play once on load
+  if(params.get('t')==='1'){ setTimeout(()=>triggerEffect({duration:2200,intense:true}), 300); }
+
+  // Also listen to postMessage for runtime triggers (TikFinity can "Show Overlay" and also can call script?)
+  window.addEventListener('message', (ev)=>{
+    try{
+      const data = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+      if(data && data.cmd==='trigger'){ triggerEffect(data.opts||{}); }
+    }catch(e){}
+  }, false);
+
+  // debug buttons
+  btn.onclick = ()=> triggerEffect({duration:2600,intense:true});
+  btn2.onclick = ()=> triggerEffect({duration:900,intense:false});
+})();
+</script>
+</body>
+</html>
